@@ -157,6 +157,38 @@
     font-size:13.5px;
     width:100%;
   }
+
+  .sync-panel{margin-top:4px;}
+  .sync-toggle{
+    width:100%;
+    background:none;
+    color:var(--text-dim);
+    border:1px solid var(--line);
+    padding:10px;
+    border-radius:8px;
+    font-size:13px;
+    font-weight:500;
+  }
+  .sync-note{font-size:12.5px;color:var(--text-dim);line-height:1.5;margin:12px 0 8px;}
+  .sync-status{font-size:12.5px;color:var(--ok);margin:8px 0 0;min-height:16px;}
+  textarea{
+    width:100%;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    border-radius:6px;
+    padding:9px;
+    font-family:var(--mono);
+    font-size:11.5px;
+    resize:vertical;
+  }
+  .footer-date{
+    text-align:center;
+    color:var(--text-dim);
+    font-size:11.5px;
+    font-family:var(--mono);
+    margin-top:20px;
+  }
 </style>
 </head>
 <body>
@@ -170,6 +202,21 @@
 
   <button class="add-toggle" id="addToggle" style="display:none;">+ Add a task</button>
   <div class="add-panel" id="addPanel" style="display:none;"></div>
+
+  <div class="sync-panel">
+    <button class="sync-toggle" id="syncToggle">Backup / move to another device</button>
+    <div id="syncBody" style="display:none;">
+      <p class="sync-note">Your tasks are saved on this device only. To copy them to your laptop or phone, copy the code below and paste it into the same box on the other device.</p>
+      <textarea id="syncBox" rows="4" placeholder="Backup code appears here"></textarea>
+      <div class="btn-row">
+        <button class="btn-ghost" onclick="exportData()">Copy my data</button>
+        <button class="btn-ghost" onclick="importData()">Restore from code</button>
+      </div>
+      <p class="sync-status" id="syncStatus"></p>
+    </div>
+  </div>
+
+  <p class="footer-date">Today: <span id="todayLabel"></span></p>
 </div>
 
 <script>
@@ -179,17 +226,26 @@ let addOpen = false;
 
 function uid(){ return 't' + Date.now() + Math.random().toString(36).slice(2,7); }
 
+function toLocalDateStr(d){
+  // Build the date string from LOCAL date parts. Using toISOString() here
+  // would convert to UTC and roll the date forward in the evening.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function addMonths(dateStr, months){
   const d = new Date(dateStr + 'T00:00:00');
   const day = d.getDate();
   d.setMonth(d.getMonth() + months);
   // handle month-length overflow (e.g. Jan 31 + 1mo)
   if(d.getDate() < day) d.setDate(0);
-  return d.toISOString().slice(0,10);
+  return toLocalDateStr(d);
 }
 
 function todayStr(){
-  return new Date().toISOString().slice(0,10);
+  return toLocalDateStr(new Date());
 }
 
 function daysUntil(dateStr){
@@ -395,6 +451,50 @@ function submitNewTask(){
   render();
 }
 
+document.getElementById('syncToggle').addEventListener('click', () => {
+  const body = document.getElementById('syncBody');
+  body.style.display = body.style.display === 'none' ? 'block' : 'none';
+});
+
+function exportData(){
+  const box = document.getElementById('syncBox');
+  box.value = JSON.stringify(tasks);
+  box.select();
+  try{
+    document.execCommand('copy');
+    setStatus('Copied. Paste it into the same box on your other device.');
+  }catch(e){
+    setStatus('Select the text above and copy it manually.');
+  }
+}
+
+function importData(){
+  const raw = document.getElementById('syncBox').value.trim();
+  if(!raw){ setStatus('Paste a backup code first.'); return; }
+  try{
+    const parsed = JSON.parse(raw);
+    if(!Array.isArray(parsed)) throw new Error('not a list');
+    const clean = parsed.filter(t => t && t.name && t.intervalMonths && t.lastDone);
+    if(clean.length === 0) throw new Error('empty');
+    tasks = clean.map(t => ({
+      id: t.id || uid(),
+      name: String(t.name),
+      intervalMonths: Number(t.intervalMonths),
+      lastDone: t.lastDone,
+      nextDue: t.nextDue || addMonths(t.lastDone, Number(t.intervalMonths))
+    }));
+    saveTasks();
+    render();
+    setStatus('Restored ' + tasks.length + ' task(s).');
+  }catch(e){
+    setStatus('That code could not be read. Copy the whole thing and try again.');
+  }
+}
+
+function setStatus(msg){
+  document.getElementById('syncStatus').textContent = msg;
+}
+
 // Recalculate countdowns whenever the app is reopened or brought back
 // to the foreground, so "days left" is never stale.
 let lastRenderDay = todayStr();
@@ -404,6 +504,7 @@ function refreshIfStale(){
   if(now !== lastRenderDay){
     lastRenderDay = now;
   }
+  document.getElementById('todayLabel').textContent = fmtDate(now);
   render();
 }
 
@@ -413,6 +514,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pageshow', refreshIfStale);
 window.addEventListener('focus', refreshIfStale);
 
+document.getElementById('todayLabel').textContent = fmtDate(todayStr());
 loadTasks();
 </script>
 </body>
